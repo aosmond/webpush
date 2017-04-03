@@ -1,0 +1,12 @@
+[package]
+name = "webpush"
+version = "0.1.0"
+authors = ["Andrew Osmond <aosmond@gmail.com>"]
+
+[dependencies]
+libc = "0.2.7"
+log = "0.3"
+openssl-sys = "0.7.6"
+rand = "0.3"
+rust-crypto = "0.2.34"
+rustc-serialize = "0.3"
