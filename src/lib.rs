@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate hyper;
+extern crate hyper_native_tls;
 extern crate libc;
 #[macro_use]
 extern crate log;
@@ -6,10 +9,5 @@ extern crate rand;
 extern crate rustc_serialize;
 
 pub mod crypto;
+pub mod subscription;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-    }
-}
