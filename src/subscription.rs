@@ -172,3 +172,18 @@ impl Subscription {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{Subscription, SubscriptionManager};
+
+    #[test]
+    fn try_push() {
+        let manager = SubscriptionManager::new(None);
+        let sub = Subscription::new("https://updates.push.services.mozilla.com/wpush/v1/gAAAAABY46XRjSweIO5v4Sedj5Rzwg-RR3iTGP5RCB2Qqdoul2zSey_vM3Nnt0x3x8XM9oMxYbs4qW1Bj6vxWO4WJpL_cXFTEXeQXc8fiMa1AjS8ZXiD2H-MYurEEL4AoNJLXlnqdA-K",
+//        let sub = Subscription::new("http://localhost:9",
+                                    "BLQMve4OpG2qgwsqemr_UL8m49fcQ8omZ-eZXeFnx-aiFOVzFDPenBt90sOQO_sIV9q-QeNNGTpJXfeEuGPiDQE",
+                                    "eks8ehlEqlDMD3cV1NJuKQ");
+        manager.post(&sub, "rust auto test");
+    }
+}
+
