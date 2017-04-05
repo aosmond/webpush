@@ -11,7 +11,6 @@ extern crate openssl_sys;
 extern crate rand;
 extern crate rustc_serialize;
 
-#[macro_use]
 pub mod error;
 pub mod crypto;
 pub mod subscription;

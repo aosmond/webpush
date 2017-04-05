@@ -17,41 +17,29 @@ pub enum WebPushError {
     MalformedEncryptedData,
 }
 
-pub type WebPushResult<T> = Result<T, WebPushError>; 
-
-macro_rules! try_base64 {
-    [ $maybe:expr ] => {
-        match $maybe {
-            Ok(value) => value,
-            Err(e) => return Err(WebPushError::FromBase64(e)),
-        }
+impl From<openssl::error::ErrorStack> for WebPushError {
+    fn from(err: openssl::error::ErrorStack) -> WebPushError {
+        WebPushError::Openssl(err)
     }
 }
 
-macro_rules! try_openssl {
-    [ $maybe:expr ] => {
-        match $maybe {
-            Ok(value) => value,
-            Err(e) => return Err(WebPushError::Openssl(e)),
-        }
+impl From<hyper::error::Error> for WebPushError {
+    fn from(err: hyper::error::Error) -> WebPushError {
+        WebPushError::Hyper(err)
     }
 }
 
-macro_rules! try_hyper {
-    [ $maybe:expr ] => {
-        match $maybe {
-            Ok(value) => value,
-            Err(e) => return Err(WebPushError::Hyper(e)),
-        }
+impl From<FromBase64Error> for WebPushError {
+    fn from(err: FromBase64Error) -> WebPushError {
+        WebPushError::FromBase64(err)
     }
 }
 
-macro_rules! try_utf8 {
-    [ $maybe:expr ] => {
-        match $maybe {
-            Ok(value) => value,
-            Err(e) => return Err(WebPushError::FromUtf8(e)),
-        }
+impl From<FromUtf8Error> for WebPushError {
+    fn from(err: FromUtf8Error) -> WebPushError {
+        WebPushError::FromUtf8(err)
     }
 }
+
+pub type WebPushResult<T> = Result<T, WebPushError>;
 

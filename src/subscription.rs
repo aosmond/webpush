@@ -139,7 +139,7 @@ impl Subscription {
         };
 
         // TODO: Add a retry mechanism if 429 Too Many Requests returned by push service
-        Ok(try_hyper!(req.send()))
+        Ok(try!(req.send()))
     }
 }
 
