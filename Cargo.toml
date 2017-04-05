@@ -14,5 +14,5 @@ rust-crypto = "0.2.34"
 rustc-serialize = "0.3"
 
 [replace]
-"openssl:0.9.10" = { path = "../rust-openssl/openssl" }
-"openssl-sys:0.9.10" = { path = "../rust-openssl/openssl-sys" }
+"openssl:0.9.10" = { git = "https://github.com/aosmond/rust-openssl", branch = "add_evp_pkey_derive" }
+"openssl-sys:0.9.10" = { git = "https://github.com/aosmond/rust-openssl", branch = "add_evp_pkey_derive" }
