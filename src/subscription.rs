@@ -12,10 +12,16 @@ use hyper::net::HttpsConnector;
 use hyper_native_tls::NativeTlsClient;
 use std::cmp::max;
 
-header! { (Encryption, "Encryption") => [String] }
-header! { (EncryptionKey, "Encryption-Key") => [String] }
-header! { (CryptoKey, "Crypto-Key") => [String] }
-header! { (Ttl, "TTL") => [u32] }
+// Place these headers inside a sub module to prevent them from getting
+// exported by the crate, as the macro declares them pub.
+mod hidden {
+    header! { (CryptoKey, "Crypto-Key") => [String] }
+    header! { (Encryption, "Encryption") => [String] }
+    header! { (EncryptionKey, "Encryption-Key") => [String] }
+    header! { (Ttl, "TTL") => [u32] }
+}
+
+use self::hidden::{CryptoKey, Encryption, EncryptionKey, Ttl};
 
 pub struct SubscriptionManager
 {
@@ -142,19 +148,4 @@ impl Subscription {
         Ok(try!(req.send()))
     }
 }
-
-/*
-#[cfg(test)]
-mod tests {
-    use super::{Subscription, SubscriptionManager};
-
-    #[test]
-    fn try_push() {
-        let manager = SubscriptionManager::new(None);
-        let sub = Subscription::new("https://updates.push.services.mozilla.com/wpush/v1/gAAAAABY46XRjSweIO5v4Sedj5Rzwg-RR3iTGP5RCB2Qqdoul2zSey_vM3Nnt0x3x8XM9oMxYbs4qW1Bj6vxWO4WJpL_cXFTEXeQXc8fiMa1AjS8ZXiD2H-MYurEEL4AoNJLXlnqdA-K",
-                                    "BLQMve4OpG2qgwsqemr_UL8m49fcQ8omZ-eZXeFnx-aiFOVzFDPenBt90sOQO_sIV9q-QeNNGTpJXfeEuGPiDQE",
-                                    "eks8ehlEqlDMD3cV1NJuKQ");
-        manager.post(&sub, "rust auto test");
-    }
-}*/
 
