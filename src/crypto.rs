@@ -58,18 +58,18 @@ unsafe impl Send for CryptoContext {}
 unsafe impl Sync for CryptoContext {}
 
 impl CryptoContext {
-    pub fn new() -> Option<Self> {
-        let mut bn = BigNumContext::new().unwrap();
-        let group = ec::EcGroup::from_curve_name(nid::X9_62_PRIME256V1).unwrap();
-        let local_key = ec::EcKey::generate(&group).unwrap();
+    pub fn new() -> WebPushResult<Self> {
+        let mut bn = try!(BigNumContext::new());
+        let group = try!(ec::EcGroup::from_curve_name(nid::X9_62_PRIME256V1));
+        let local_key = try!(ec::EcKey::generate(&group));
 
         let public_key_bytes;
         {
             let public_key = local_key.public_key().unwrap();
-            public_key_bytes = public_key.to_bytes(&group, ec::POINT_CONVERSION_UNCOMPRESSED, &mut bn).unwrap();
+            public_key_bytes = try!(public_key.to_bytes(&group, ec::POINT_CONVERSION_UNCOMPRESSED, &mut bn));
         }
 
-        Some(CryptoContext {
+        Ok(CryptoContext {
             public_key: public_key_bytes.to_base64(URL_SAFE),
             // This needs to be protected by a mutex because OpenSSL updates
             // the reference count, even if we shouldn't need to modify anything
@@ -93,10 +93,13 @@ impl CryptoContext {
         let peer_eckey = try!(ec::EcKey::from_public_key(&group, &peer_ecpoint));
         let peer_pkey = try!(pkey::PKey::from_ec_key(peer_eckey));
 
-        let key_pair = self.key_pair.lock().unwrap();
-        let local_eckey = try!((*key_pair).to_owned());
-        let local_pkey = try!(pkey::PKey::from_ec_key(local_eckey));
+        let local_eckey;
+        {
+            let key_pair = self.key_pair.lock().unwrap();
+            local_eckey = try!((*key_pair).to_owned());
+        }
 
+        let local_pkey = try!(pkey::PKey::from_ec_key(local_eckey));
         let mut ctx = try!(pkey::PKeyCtx::from_pkey(&local_pkey));
         Ok(try!(ctx.derive_from_peer(&peer_pkey)))
     }

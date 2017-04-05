@@ -30,11 +30,12 @@ pub struct SubscriptionManager
 }
 
 impl SubscriptionManager {
-    pub fn new(gcm_api_key: Option<String>) -> Self {
-        SubscriptionManager {
+    pub fn new(gcm_api_key: Option<String>) -> WebPushResult<Self> {
+        let crypto = try!(CryptoContext::new());
+        Ok(SubscriptionManager {
             gcm_api_key: gcm_api_key,
-            crypto: CryptoContext::new().unwrap(),
-        }
+            crypto: crypto,
+        })
     }
 
     pub fn with_crypto(crypto: CryptoContext, gcm_api_key: Option<String>) -> Self {
