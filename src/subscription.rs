@@ -3,7 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use crypto::CryptoContext;
-use hyper;
+use error::{WebPushError, WebPushResult};
 use hyper::header::{ContentEncoding, Encoding, Authorization};
 use hyper::Client;
 use hyper::client::Body;
@@ -16,12 +16,6 @@ header! { (Encryption, "Encryption") => [String] }
 header! { (EncryptionKey, "Encryption-Key") => [String] }
 header! { (CryptoKey, "Crypto-Key") => [String] }
 header! { (Ttl, "TTL") => [u32] }
-
-pub enum Error {
-    MissingGcmApiKey,
-    EncryptFailed,
-    Hyper(hyper::error::Error),
-}
 
 pub struct SubscriptionManager
 {
@@ -44,12 +38,8 @@ impl SubscriptionManager {
         }
     }
 
-    pub fn post(&self, sub: &Subscription, message: &str) -> Result<Response, Error> {
-        let gcm_api_key = match self.gcm_api_key {
-            Some(ref x) => &x,
-            None => "",
-        };
-        sub.post(&self.crypto, gcm_api_key, message)
+    pub fn post(&self, sub: &Subscription, message: &str) -> WebPushResult<Response> {
+        sub.post(&self.crypto, &self.gcm_api_key, message)
     }
 }
 
@@ -68,7 +58,7 @@ impl Subscription {
         }
     }
 
-    pub fn post(&self, crypto: &CryptoContext, gcm_api_key: &str, message: &str) -> Result<Response, Error> {
+    fn post(&self, crypto: &CryptoContext, gcm_api_key: &Option<String>, message: &str) -> WebPushResult<Response> {
         // Make the record size at least the size of the encrypted message. We must
         // add 16 bytes for the encryption tag, 1 byte for padding and 1 byte to
         // ensure we don't end on a record boundary.
@@ -87,18 +77,8 @@ impl Subscription {
         // parameter can be omitted for messages that fit within this limit."
         //
         let record_size = max(4096, message.len() + 18);
-        let enc = match crypto.encrypt(&self.public_key,
-                                       message.to_owned(),
-                                       &self.auth,
-                                       record_size) {
-            Some(x) => x,
-            None => {
-                warn!("notity subscription {} failed for {}",
-                      self.push_uri,
-                      message);
-                return Err(Error::EncryptFailed);
-            }
-        };
+        let enc = try!(crypto.encrypt(&self.public_key, message.to_owned(),
+                                      &self.auth, record_size));
 
         // If using Google's push service, we need to replace the given endpoint URI
         // with one known to work with WebPush, as support has not yet rolled out to
@@ -124,12 +104,12 @@ impl Subscription {
         //
         // https://github.com/GoogleChrome/web-push-encryption/blob/dd8c58c62b1846c481ceb066c52da0d695c8415b/src/push.js#L84
         if push_uri != self.push_uri {
-            if gcm_api_key.is_empty() {
-                warn!("cannot notify subscription {}, GCM API key missing from foxbox.conf",
-                      push_uri);
-                return Err(Error::MissingGcmApiKey);
-            }
-            req = req.header(Authorization(format!("key={}", gcm_api_key)));
+            match *gcm_api_key {
+                Some(ref key) => {
+                    req = req.header(Authorization(format!("key={}", key)));
+                },
+                None => return Err(WebPushError::MissingGcmApiKey),
+            };
         }
 
         req = if has_auth {
@@ -159,16 +139,7 @@ impl Subscription {
         };
 
         // TODO: Add a retry mechanism if 429 Too Many Requests returned by push service
-        let rsp = match req.send() {
-            Ok(x) => x,
-            Err(e) => {
-                warn!("notify subscription {} failed: {:?}", push_uri, e);
-                return Err(Error::Hyper(e));
-            }
-        };
-
-        info!("notified subscription {} (status {:?})", push_uri, rsp.status);
-        Ok(rsp)
+        Ok(try_hyper!(req.send()))
     }
 }
 

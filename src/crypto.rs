@@ -12,13 +12,13 @@
 
 extern crate crypto;
 
-use openssl;
+use error::{WebPushError, WebPushResult};
+
 use openssl::bn::BigNumContext;
 use openssl::ec;
 use openssl::nid;
 use openssl::pkey;
 
-#[cfg(test)]
 use self::crypto::aead::AeadDecryptor;
 use self::crypto::aead::AeadEncryptor;
 use self::crypto::aes_gcm::AesGcm;
@@ -86,19 +86,19 @@ impl CryptoContext {
         }
     }
 
-    pub fn ecdh_derive_keys(&self, peer_key_bytes: &[u8]) -> Result<Vec<u8>, openssl::error::ErrorStack> {
-        let mut bn = try!(BigNumContext::new());
-        let group = try!(ec::EcGroup::from_curve_name(nid::X9_62_PRIME256V1));
-        let peer_ecpoint = try!(ec::EcPoint::from_bytes(&group, peer_key_bytes, &mut bn));
-        let peer_eckey = try!(ec::EcKey::from_public_key(&group, &peer_ecpoint));
-        let peer_pkey = try!(pkey::PKey::from_ec_key(peer_eckey));
+    pub fn ecdh_derive_keys(&self, peer_key_bytes: &[u8]) -> WebPushResult<Vec<u8>> {
+        let mut bn = try_openssl!(BigNumContext::new());
+        let group = try_openssl!(ec::EcGroup::from_curve_name(nid::X9_62_PRIME256V1));
+        let peer_ecpoint = try_openssl!(ec::EcPoint::from_bytes(&group, peer_key_bytes, &mut bn));
+        let peer_eckey = try_openssl!(ec::EcKey::from_public_key(&group, &peer_ecpoint));
+        let peer_pkey = try_openssl!(pkey::PKey::from_ec_key(peer_eckey));
 
         let key_pair = self.key_pair.lock().unwrap();
-        let local_eckey = try!((*key_pair).from_self());
-        let local_pkey = try!(pkey::PKey::from_ec_key(local_eckey));
+        let local_eckey = try_openssl!((*key_pair).to_owned());
+        let local_pkey = try_openssl!(pkey::PKey::from_ec_key(local_eckey));
 
-        let mut ctx = try!(pkey::PKeyCtx::from_pkey(&local_pkey));
-        ctx.derive(&peer_pkey)
+        let mut ctx = try_openssl!(pkey::PKeyCtx::from_pkey(&local_pkey));
+        Ok(try_openssl!(ctx.derive_from_peer(&peer_pkey)))
     }
 
     fn aesgcm128_append_key(key_context: &mut Vec<u8>, key: &[u8]) {
@@ -112,28 +112,13 @@ impl CryptoContext {
                            auth: &Option<String>,
                            peer_key: &[u8],
                            encrypt: bool)
-                           -> Option<AuthData> {
+                           -> WebPushResult<Option<AuthData>> {
         let auth_bytes = match *auth {
-            Some(ref x) => {
-                match x.from_base64() {
-                    Ok(y) => y,
-                    Err(e) => {
-                        warn!("could not base64 decode auth: {:?}", e);
-                        return None;
-                    }
-                }
-            }
-            None => {
-                return None;
-            }
+            Some(ref x) => try_base64!(x.from_base64()),
+            None => return Ok(None),
         };
 
-        let local_key = match self.public_key.from_base64() {
-            Ok(x) => x,
-            Err(e) => {
-                panic!("could not base64 decode local public key: {:?}", e);
-            }
-        };
+        let local_key = try_base64!(self.public_key.from_base64());
 
         // Context is used later for encrypt key and nonce derivation
         // https://tools.ietf.org/html/draft-ietf-httpbis-encryption-encoding-01#section-4.2
@@ -161,10 +146,10 @@ impl CryptoContext {
         }
         key_context.push(1u8);
 
-        Some(AuthData {
+        Ok(Some(AuthData {
             auth: auth_bytes,
             key_context: key_context,
-        })
+        }))
     }
 
     fn aesgcm128_common(&self,
@@ -302,7 +287,6 @@ impl CryptoContext {
         record_nonce
     }
 
-    #[cfg(test)]
     /// Decrypts the given payload using AES-GCM 128-bit with the shared key and salt.
     /// The shared key and salt are not used directly but rather are used to derive
     /// the encryption key and nonce as defined in the draft RFC.
@@ -312,7 +296,7 @@ impl CryptoContext {
                          salt: &[u8],
                          auth: Option<AuthData>,
                          record_size: usize)
-                         -> Option<String> {
+                         -> WebPushResult<String> {
         let has_auth = auth.is_some();
         let (decrypt_key, nonce, mut seq) = self.aesgcm128_common(salt, shared_key, auth);
         let mut chunks = Vec::new();
@@ -321,7 +305,7 @@ impl CryptoContext {
         while !input.is_empty() {
             let mut bound = min(record_size, input.len());
             if bound <= AESGCM_TAG_LEN {
-                return None;
+                return Err(WebPushError::MalformedEncryptedData);
             }
             bound -= AESGCM_TAG_LEN;
 
@@ -341,7 +325,7 @@ impl CryptoContext {
             //  receiver MUST treat the stream as failed due to truncation if the
             //  final record is the full record size."
             if input.is_empty() && bound == record_size {
-                return None;
+                return Err(WebPushError::MalformedEncryptedData);
             }
 
             let mut cipher = AesGcm::new(KeySize::KeySize128,
@@ -349,7 +333,7 @@ impl CryptoContext {
                                          &record_nonce,
                                          &[0; 0]);
             if !cipher.decrypt(&chunk[..], &mut output[..], &tag[..]) {
-                return None;
+                return Err(WebPushError::MalformedEncryptedData);
             }
 
             // Strip padding from the plaintext
@@ -370,10 +354,7 @@ impl CryptoContext {
             out.extend_from_slice(&chunk[..]);
         }
 
-        match String::from_utf8(out) {
-            Ok(s) => Some(s),
-            Err(_) => None,
-        }
+        Ok(try_utf8!(String::from_utf8(out)))
     }
 
     /// Encrypts the given payload using AES-GCM 128-bit with the shared key and salt.
@@ -462,25 +443,11 @@ impl CryptoContext {
                    input: String,
                    auth: &Option<String>,
                    record_size: usize)
-                   -> Option<EncryptData> {
+                   -> WebPushResult<EncryptData> {
         // Derive public and secret keys from peer public key
-        let peer_key_bytes = match peer_key.from_base64() {
-            Ok(x) => x,
-            Err(e) => {
-                warn!("could not base64 decode peer key: {:?}", e);
-                return None;
-            }
-        };
-
-        let auth_data = self.aesgcm128_auth_data(auth, &peer_key_bytes, true);
-
-        let shared_key = match self.ecdh_derive_keys(&peer_key_bytes) {
-            Ok(key) => key,
-            Err(e) => {
-                warn!("could not derive keys {:?}", e);
-                return None;
-            }
-        };
+        let peer_key_bytes = try_base64!(peer_key.from_base64());
+        let auth_data = try!(self.aesgcm128_auth_data(auth, &peer_key_bytes, true));
+        let shared_key = try!(self.ecdh_derive_keys(&peer_key_bytes));
 
         // Create the salt for this transaction
         // https://tools.ietf.org/html/draft-thomson-http-encryption-01#section-3.1
@@ -500,46 +467,24 @@ impl CryptoContext {
             salt.to_base64(URL_SAFE)
         };
 
-        Some(EncryptData {
+        Ok(EncryptData {
             salt: salt_b64,
             output: self.aesgcm128_encrypt(input, &shared_key, &salt, auth_data, record_size),
         })
     }
 
-    #[cfg(test)]
     pub fn decrypt(&self,
                    peer_key: &str,
                    input: Vec<u8>,
                    salt: &str,
                    auth: &Option<String>,
                    record_size: usize)
-                   -> Option<String> {
+                   -> WebPushResult<String> {
         // Derive public and secret keys from peer public key
-        let peer_key_bytes = match peer_key.from_base64() {
-            Ok(x) => x,
-            Err(e) => {
-                warn!("could not base64 decode peer key: {:?}", e);
-                return None;
-            }
-        };
-
-        let auth_data = self.aesgcm128_auth_data(auth, &peer_key_bytes, false);
-
-        let shared_key = match self.ecdh_derive_keys(&peer_key_bytes) {
-            Ok(key) => key,
-            Err(e) => {
-                warn!("could not derive keys {:?}", e);
-                return None;
-            }
-        };
-
-        let salt_bytes = match salt.from_base64() {
-            Ok(x) => x,
-            Err(e) => {
-                warn!("could not base64 decode salt: {:?}", e);
-                return None;
-            }
-        };
+        let peer_key_bytes = try_base64!(peer_key.from_base64());
+        let auth_data = try!(self.aesgcm128_auth_data(auth, &peer_key_bytes, false));
+        let shared_key = try!(self.ecdh_derive_keys(&peer_key_bytes));
+        let salt_bytes = try_base64!(salt.from_base64());
 
         self.aesgcm128_decrypt(input, &shared_key, &salt_bytes, auth_data, record_size)
     }
@@ -568,8 +513,8 @@ mod tests {
         let input = vec![177, 172, 8, 114, 38, 164, 249, 255, 11, 140, 152, 0, 194, 82, 79, 121, 26, 116, 68, 34, 182];
         let shared_key = [14, 55, 71, 109, 215, 177, 33, 176, 142, 43, 241, 48, 179, 164, 96, 220, 146, 176, 76, 1, 63, 108, 78, 67, 141, 55, 125, 200, 40, 153, 252, 85];
         let salt = [23, 249, 70, 109, 205, 73, 187, 20, 140, 197, 163, 250, 114, 55, 122, 88];
-        let output = crypto.aesgcm128_decrypt(input, &shared_key, &salt, None, 4096);
-        assert_eq!(output, Some(String::from("test")));
+        let output = crypto.aesgcm128_decrypt(input, &shared_key, &salt, None, 4096).unwrap();
+        assert_eq!(output, String::from("test"));
     }
 
     #[test]
