@@ -101,7 +101,9 @@ impl CryptoContext {
 
         let local_pkey = try!(pkey::PKey::from_ec_key(local_eckey));
         let mut ctx = try!(pkey::PKeyCtx::from_pkey(&local_pkey));
-        Ok(try!(ctx.derive_from_peer(&peer_pkey)))
+        try!(ctx.derive_init());
+        try!(ctx.derive_set_peer(&peer_pkey));
+        Ok(try!(ctx.derive()))
     }
 
     fn aesgcm128_append_key(key_context: &mut Vec<u8>, key: &[u8]) {
@@ -155,6 +157,7 @@ impl CryptoContext {
         }))
     }
 
+    /// Generate the AES encryption key, initial nonce and sequence number.
     fn aesgcm128_common(&self,
                         salt: &[u8],
                         shared_key: &[u8],
@@ -263,6 +266,7 @@ impl CryptoContext {
         (encrypt_key, nonce, seq)
     }
 
+    /// Generate the nonce and sequence number for the next record.
     fn aesgcm128_record_nonce(&self, nonce: &[u8], seq: &mut [u8; 12]) -> [u8; 12] {
         // Generate the nonce for this record
         // https://tools.ietf.org/html/draft-thomson-http-encryption-01#section-3.3
